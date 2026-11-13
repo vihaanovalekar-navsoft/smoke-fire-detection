@@ -1,0 +1,10 @@
+torch>=2.0.0
+torchvision>=0.15.0
+transformers>=4.40.0
+peft>=0.10.0
+pillow>=9.5.0
+matplotlib>=3.7.0
+numpy
+tqdm
+scipy
+onedrivedownloader>=1.1.3
