@@ -1,4 +1,4 @@
-# D-Fire: Real-Time Smoke & Fire Detection with RF-DETR + DoRA
+# smoke-fire-detection
 
 Smoke and fire detection pipeline on the **D-Fire** dataset using **RF-DETR Nano** and **DoRA (Weight-Decomposed Low-Rank Adaptation)**.
 
