@@ -1,6 +1,6 @@
-# smoke-fire-detection
+# D-Fire: Real-Time Smoke & Fire Detection with RF-DETR + DoRA
 
-Smoke and fire detection pipeline on the **D-Fire** dataset using **RF-DETR Nano** and **DoRA (Weight-Decomposed Low-Rank Adaptation)**.
+Smoke and fire detection pipeline on the D-Fire dataset ([gaia-solutions-on-demand/DFireDataset](https://github.com/gaia-solutions-on-demand/DFireDataset)) using **RF-DETR Nano** and **DoRA (Weight-Decomposed Low-Rank Adaptation)**.
 
 ---
 
@@ -44,6 +44,12 @@ The model trains on a weighted combination of:
 - **Categorical Focal Loss:** Mitigates class imbalance across foreground objects and background queries.
 - **L1 Loss:** Direct bounding box coordinate regression.
 - **Complete IoU (CIoU) Loss:** Accounts for overlap area, center distance, and aspect ratio consistency to better fit expanding, irregular smoke plumes.
+
+---
+
+## Acknowledgements
+
+- Dataset sourced from [gaia-solutions-on-demand/DFireDataset](https://github.com/gaia-solutions-on-demand/DFireDataset).
 
 ---
 
