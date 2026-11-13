@@ -3,19 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# PyTorch checkpoints and model weights
-checkpoints/
-weights/
-*.pt
-*.pth
-*.safetensors
-
 # Large dataset archives, staging, and split directories
 dfire.zip
 _split_staging/
 train/
 test/
-videos/
 
 # Generated visual outputs & inference plots
 outputs/
