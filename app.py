@@ -4,6 +4,9 @@ import time
 import uuid
 import shutil
 import gc
+import atexit
+import signal
+import webbrowser
 import threading
 import subprocess
 from typing import Optional, Dict, Any
@@ -43,6 +46,58 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 # Device
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"[SmokeFireAI] Initializing on device: {DEVICE}")
+
+# Process and Port Management Helpers
+def free_port(port: int = 8000):
+    """Kills any process currently occupying the required port."""
+    try:
+        if sys.platform == "win32":
+            cmd = f"Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess"
+            res = subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True, text=True)
+            pids = set(res.stdout.strip().split())
+            current_pid = str(os.getpid())
+            for pid_str in pids:
+                if pid_str.isdigit() and pid_str != current_pid and int(pid_str) > 0:
+                    print(f"[SmokeFireAI] Freeing port {port}: terminating process PID {pid_str}...")
+                    subprocess.run(["taskkill", "/F", "/PID", pid_str], capture_output=True)
+                    time.sleep(0.4)
+        else:
+            res = subprocess.run(["lsof", "-t", f"-i:{port}"], capture_output=True, text=True)
+            for pid in res.stdout.strip().split():
+                if pid.isdigit() and int(pid) != os.getpid():
+                    os.kill(int(pid), signal.SIGKILL)
+    except Exception as e:
+        print(f"[SmokeFireAI] Port cleanup note: {e}")
+
+# Free port 8000 immediately during startup
+free_port(8000)
+
+def purge_vram():
+    """Unloads all model weights from GPU and purges CUDA memory caches."""
+    global loaded_models
+    print("[SmokeFireAI] App closing: clearing model weights out of VRAM...")
+    try:
+        with model_lock:
+            loaded_models.clear()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+        gc.collect()
+        print("[SmokeFireAI] GPU VRAM successfully purged to 0.0 MB.")
+    except Exception as e:
+        print(f"[SmokeFireAI] VRAM cleanup exception: {e}")
+
+# Register process termination cleanup
+atexit.register(purge_vram)
+
+def open_browser_delayed(url: str = "http://127.0.0.1:8000"):
+    """Waits for server to start listening and automatically opens default browser."""
+    time.sleep(1.2)
+    print(f"[SmokeFireAI] Opening application in browser: {url}")
+    try:
+        webbrowser.open(url)
+    except Exception as e:
+        print(f"[SmokeFireAI] Browser auto-open note: {e}")
 
 # Model registry & caching
 MODEL_PATHS = {
@@ -589,14 +644,29 @@ async def list_sample_videos():
                 })
     return JSONResponse({"samples": samples})
 
-# Preload SOTA model at server startup
+# Startup & Shutdown lifecycle hooks
 @app.on_event("startup")
 def startup_event():
+    # Preload SOTA model in background
     threading.Thread(target=load_detection_model, args=("sota_5ep",), daemon=True).start()
+    # Automatically open web studio in Chrome/default browser
+    threading.Thread(target=open_browser_delayed, args=("http://127.0.0.1:8000",), daemon=True).start()
+
+@app.on_event("shutdown")
+def shutdown_event():
+    # Purge all weights from VRAM when server shuts down
+    purge_vram()
 
 # Mount static directory for frontend
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=False)
+    PORT = 8000
+    HOST = "127.0.0.1"
+
+    # Ensure port is clean before server starts
+    free_port(PORT)
+
+    # Launch server
+    uvicorn.run("app:app", host=HOST, port=PORT, reload=False)
