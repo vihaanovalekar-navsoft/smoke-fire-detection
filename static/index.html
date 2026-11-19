@@ -673,6 +673,10 @@
             <span>🛰️ Utah Cottonwood Satellite Fire</span>
             <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">6.87 MB</span>
           </button>
+          <button class="sample-btn" data-sample="Bhopal Fire Breaks Out Shop WION Shorts.mp4">
+            <span>🏪 Bhopal Market Shop Fire</span>
+            <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">15.2 MB</span>
+          </button>
         </div>
       </div>
 
@@ -696,6 +700,7 @@
         <label class="control-label" for="modelSelect">3. Inference Model Checkpoint</label>
         <select id="modelSelect">
           <option value="sota_5ep" selected>RF-DETR Nano + DoRA (5-Epoch SOTA Color - Val Loss 0.7697)</option>
+          <option value="small_512">RF-DETR Small + DoRA (512x512 High-Res + Random Blur Augmentation)</option>
           <option value="gray_3ep">RF-DETR Nano + DoRA (3-Epoch Grayscale Baseline - Val Loss 1.6978)</option>
         </select>
       </div>

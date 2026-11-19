@@ -74,11 +74,12 @@ free_port(8000)
 
 def purge_vram():
     """Unloads all model weights from GPU and purges CUDA memory caches."""
-    global loaded_models
+    global loaded_models, loaded_processors
     print("[SmokeFireAI] App closing: clearing model weights out of VRAM...")
     try:
         with model_lock:
             loaded_models.clear()
+            loaded_processors.clear()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
@@ -102,18 +103,22 @@ def open_browser_delayed(url: str = "http://127.0.0.1:8000"):
 # Model registry & caching
 MODEL_PATHS = {
     "sota_5ep": os.path.join(BASE_DIR, "checkpoints", "best_rf_detr_dora.pt"),
+    "small_512": os.path.join(BASE_DIR, "checkpoints", "best_rf_detr_small_dora.pt"),
     "gray_3ep": os.path.join(BASE_DIR, "checkpoints", "best_rf_detr_dora_3ep.pt"),
 }
 
 loaded_models: Dict[str, Any] = {}
+loaded_processors: Dict[str, Any] = {}
 model_lock = threading.Lock()
-processor_instance = None
 
-def get_processor():
-    global processor_instance
-    if processor_instance is None:
-        processor_instance = AutoImageProcessor.from_pretrained("Roboflow/rf-detr-nano")
-    return processor_instance
+def get_processor(model_key: str = "sota_5ep"):
+    global loaded_processors
+    model_id = "Roboflow/rf-detr-small" if ("small" in model_key or "512" in model_key) else "Roboflow/rf-detr-nano"
+    with model_lock:
+        if model_id not in loaded_processors:
+            print(f"[SmokeFireAI] Initializing AutoImageProcessor for {model_id}...")
+            loaded_processors[model_id] = AutoImageProcessor.from_pretrained(model_id)
+        return loaded_processors[model_id]
 
 def load_detection_model(model_key: str = "sota_5ep"):
     global loaded_models
@@ -121,12 +126,11 @@ def load_detection_model(model_key: str = "sota_5ep"):
         if model_key in loaded_models:
             return loaded_models[model_key]
 
+        is_small = ("small" in model_key or "512" in model_key)
+        model_id = "Roboflow/rf-detr-small" if is_small else "Roboflow/rf-detr-nano"
         ckpt_path = MODEL_PATHS.get(model_key)
-        if not ckpt_path or not os.path.exists(ckpt_path):
-            raise FileNotFoundError(f"Checkpoint not found at: {ckpt_path}")
 
-        print(f"[SmokeFireAI] Loading model '{model_key}' from {ckpt_path} onto {DEVICE}...")
-        model_id = "Roboflow/rf-detr-nano"
+        print(f"[SmokeFireAI] Loading model architecture '{model_id}' (key: {model_key}) onto {DEVICE}...")
         model = AutoModelForObjectDetection.from_pretrained(
             model_id, num_labels=2, ignore_mismatched_sizes=True
         )
@@ -143,8 +147,13 @@ def load_detection_model(model_key: str = "sota_5ep"):
         )
         model.model.backbone = get_peft_model(model.model.backbone, dora_config)
 
-        ckpt = torch.load(ckpt_path, map_location=DEVICE)
-        model.load_state_dict(ckpt["model_state_dict"])
+        if ckpt_path and os.path.exists(ckpt_path):
+            print(f"[SmokeFireAI] Loading weights from checkpoint: {ckpt_path}")
+            ckpt = torch.load(ckpt_path, map_location=DEVICE)
+            model.load_state_dict(ckpt["model_state_dict"])
+        else:
+            print(f"[SmokeFireAI] Checkpoint '{ckpt_path}' not found locally; running with base {model_id} initialization.")
+
         model.to(DEVICE)
         model.eval()
 
@@ -167,7 +176,10 @@ def draw_hud(frame, frame_idx, total_frames, num_smoke, num_fire, conf_thresh, m
     font_thick = max(1, int(round(font_scale * 1.8)))
 
     # Title & model info
-    title_text = f"RF-DETR Nano + DoRA ({model_label}) | Conf >= {conf_thresh*100:.0f}%"
+    if "512" in model_label or "Small" in model_label:
+        title_text = f"RF-DETR Small (512x512) + DoRA | Conf >= {conf_thresh*100:.0f}%"
+    else:
+        title_text = f"RF-DETR Nano + DoRA ({model_label}) | Conf >= {conf_thresh*100:.0f}%"
     cv2.putText(
         frame,
         title_text,
@@ -258,8 +270,14 @@ def process_video_worker(
         jobs[job_id]["status"] = "processing"
         jobs[job_id]["message"] = "Initializing model and reading video..."
 
-        model_label = "5-Epoch SOTA Color" if model_type == "sota_5ep" else "3-Epoch Grayscale"
-        processor = get_processor()
+        if "small" in model_type or "512" in model_type:
+            model_label = "RF-DETR Small (512x512)"
+        elif model_type == "sota_5ep":
+            model_label = "5-Epoch SOTA Color"
+        else:
+            model_label = "3-Epoch Grayscale"
+
+        processor = get_processor(model_type)
         model = load_detection_model(model_type)
 
         cap = cv2.VideoCapture(input_path)
@@ -503,9 +521,10 @@ async def get_vram_status():
 
 @app.post("/api/clear_vram")
 async def clear_vram():
-    global loaded_models
+    global loaded_models, loaded_processors
     with model_lock:
         loaded_models.clear()
+        loaded_processors.clear()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
