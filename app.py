@@ -12,6 +12,7 @@ import subprocess
 from typing import Optional, Dict, Any
 
 import cv2
+import numpy as np
 import torch
 import torchvision.ops
 from PIL import Image
@@ -203,6 +204,71 @@ def draw_hud(frame, frame_idx, total_frames, num_smoke, num_fire, conf_smoke, co
         cv2.LINE_AA,
     )
 
+def snap_faint_smoke_box(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int, pad: int = 6) -> tuple[int, int, int, int]:
+    """
+    Adaptive Content-Aware Snapping for smoke plumes.
+    Uses Atmospheric Scattering (Dark Channel Prior) + Gaussian de-texturing + Otsu Adaptive Threshold
+    to trim unneeded empty background (sky, walls, ground) and tightly fit the smoke boundary.
+    Works on both faint/translucent smoke and dense black/white plumes.
+    """
+    h_frame, w_frame = frame.shape[:2]
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w_frame, x2), min(h_frame, y2)
+    crop_w, crop_h = x2 - x1, y2 - y1
+    if crop_w < 20 or crop_h < 20:
+        return x1, y1, x2, y2
+
+    crop = frame[y1:y2, x1:x2]
+    # Atmospheric Dark Channel: min(R, G, B) captures scattering through aerosol/smoke
+    dark_ch = np.min(crop, axis=2).astype(np.uint8)
+    blurred = cv2.GaussianBlur(dark_ch, (9, 9), 0)
+
+    # Dynamic Otsu threshold: separates the smoke cluster from the clear background
+    _, mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Automatically identify if background is brighter or darker than smoke
+    # Sample the outer corners of the box (background reference)
+    c_h, c_w = mask.shape
+    corner_samples = [
+        mask[0:min(10, c_h), 0:min(10, c_w)],
+        mask[0:min(10, c_h), max(0, c_w-10):c_w],
+        mask[max(0, c_h-10):c_h, 0:min(10, c_w)],
+        mask[max(0, c_h-10):c_h, max(0, c_w-10):c_w],
+    ]
+    valid_corners = [c for c in corner_samples if c.size > 0]
+    if valid_corners:
+        corner_mean = np.mean([np.mean(c) for c in valid_corners])
+        if corner_mean > 128:  # Corners are white (background is brighter, e.g. dark smoke on sky)
+            mask = cv2.bitwise_not(mask)
+
+    # Morphological opening (removes noise) and closing (reconnects faint wisps)
+    open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    mask_clean = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel)
+    mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_CLOSE, close_kernel)
+
+    contours, _ = cv2.findContours(mask_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return x1, y1, x2, y2
+
+    # Retain active smoke components that make up at least 3% of the candidate box
+    min_area = 0.03 * (crop_w * crop_h)
+    valid_contours = [c for c in contours if cv2.contourArea(c) >= min_area]
+
+    if valid_contours:
+        all_pts = np.vstack(valid_contours)
+        bx, by, bw, bh = cv2.boundingRect(all_pts)
+
+        # Only tighten if it trims unneeded margin (> 5% reduction)
+        if bw < crop_w * 0.95 or bh < crop_h * 0.95:
+            nx1 = max(0, x1 + bx - pad)
+            ny1 = max(0, y1 + by - pad)
+            nx2 = min(w_frame, x1 + bx + bw + pad)
+            ny2 = min(h_frame, y1 + by + bh + pad)
+            return nx1, ny1, nx2, ny2
+
+    return x1, y1, x2, y2
+
 def draw_detections(frame, detections, width, height):
     class_styles = {
         0: {"name": "SMOKE", "bgr": (255, 229, 0), "text_color": (0, 0, 0)},     # Cyan/Yellow
@@ -354,10 +420,16 @@ def process_video_worker(
                             nms_idx = torchvision.ops.nms(c_xyxy, c_sc, iou_threshold=iou_thresh)
 
                             for idx in nms_idx:
+                                box_coords = [int(v.item()) for v in c_xyxy[idx]]
+                                if c_id == 0:  # Adaptive Content-Aware Snapping for smoke
+                                    bx1, by1, bx2, by2 = box_coords
+                                    bx1, by1, bx2, by2 = snap_faint_smoke_box(f_orig, bx1, by1, bx2, by2)
+                                    box_coords = [bx1, by1, bx2, by2]
+
                                 detections.append({
                                     "class_id": c_id,
                                     "score": float(c_sc[idx].item()),
-                                    "box": [int(v.item()) for v in c_xyxy[idx]],
+                                    "box": box_coords,
                                 })
 
                     detections.sort(key=lambda d: d["score"])
@@ -420,10 +492,16 @@ def process_video_worker(
                         c_sc = k_scores[c_mask]
                         nms_idx = torchvision.ops.nms(c_xyxy, c_sc, iou_threshold=iou_thresh)
                         for idx in nms_idx:
+                            box_coords = [int(v.item()) for v in c_xyxy[idx]]
+                            if c_id == 0:  # Adaptive Content-Aware Snapping for smoke
+                                bx1, by1, bx2, by2 = box_coords
+                                bx1, by1, bx2, by2 = snap_faint_smoke_box(f_orig, bx1, by1, bx2, by2)
+                                box_coords = [bx1, by1, bx2, by2]
+
                             detections.append({
                                 "class_id": c_id,
                                 "score": float(c_sc[idx].item()),
-                                "box": [int(v.item()) for v in c_xyxy[idx]],
+                                "box": box_coords,
                             })
 
                 detections.sort(key=lambda d: d["score"])
