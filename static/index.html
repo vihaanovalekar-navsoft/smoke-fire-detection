@@ -680,18 +680,36 @@
         </div>
       </div>
 
-      <!-- Confidence Setting -->
+      <!-- Dual Confidence Settings -->
       <div class="control-group">
-        <div class="control-header">
-          <label class="control-label" for="confSlider">2. Detection Confidence Threshold</label>
-          <span class="confidence-badge" id="confValue">40%</span>
-        </div>
-        <input type="range" id="confSlider" min="0.05" max="0.95" step="0.01" value="0.40" />
+        <label class="control-label">2. Confidence Thresholds (Smoke & Fire)</label>
         
-        <div class="confidence-presets">
-          <button class="preset-chip" type="button" data-val="0.25">0.25 (Sensitive)</button>
-          <button class="preset-chip" type="button" data-val="0.40">0.40 (Balanced)</button>
-          <button class="preset-chip" type="button" data-val="0.60">0.60 (Strict)</button>
+        <!-- Smoke Confidence Slider -->
+        <div style="margin-bottom: 12px; background: rgba(0, 229, 255, 0.03); border: 1px solid rgba(0, 229, 255, 0.18); border-radius: 12px; padding: 12px 14px;">
+          <div class="control-header" style="margin-bottom: 8px;">
+            <span style="font-size: 0.85rem; font-weight: 600; color: var(--accent-smoke); display: flex; align-items: center; gap: 6px;">
+              <span>💨</span> Smoke Threshold
+            </span>
+            <span class="confidence-badge" id="smokeConfValue" style="background: rgba(0, 229, 255, 0.15); color: var(--accent-smoke); border-color: rgba(0, 229, 255, 0.3);">35%</span>
+          </div>
+          <input type="range" id="smokeConfSlider" min="0.05" max="0.95" step="0.01" value="0.35" style="accent-color: var(--accent-smoke);" />
+        </div>
+
+        <!-- Fire Confidence Slider -->
+        <div style="background: rgba(255, 77, 46, 0.03); border: 1px solid rgba(255, 77, 46, 0.18); border-radius: 12px; padding: 12px 14px;">
+          <div class="control-header" style="margin-bottom: 8px;">
+            <span style="font-size: 0.85rem; font-weight: 600; color: var(--accent-fire); display: flex; align-items: center; gap: 6px;">
+              <span>🔥</span> Fire Threshold
+            </span>
+            <span class="confidence-badge" id="fireConfValue" style="background: rgba(255, 77, 46, 0.15); color: var(--accent-fire); border-color: rgba(255, 77, 46, 0.3);">40%</span>
+          </div>
+          <input type="range" id="fireConfSlider" min="0.05" max="0.95" step="0.01" value="0.40" style="accent-color: var(--accent-fire);" />
+        </div>
+
+        <div class="confidence-presets" style="margin-top: 10px;">
+          <button class="preset-chip" type="button" data-smoke="0.25" data-fire="0.30">Sensitive (25% / 30%)</button>
+          <button class="preset-chip" type="button" data-smoke="0.35" data-fire="0.40">Balanced (35% / 40%)</button>
+          <button class="preset-chip" type="button" data-smoke="0.50" data-fire="0.60">Strict (50% / 60%)</button>
         </div>
       </div>
 
@@ -790,8 +808,10 @@
     const fileSize = document.getElementById('fileSize');
     const removeFileBtn = document.getElementById('removeFileBtn');
     const samplesContainer = document.getElementById('samplesContainer');
-    const confSlider = document.getElementById('confSlider');
-    const confValue = document.getElementById('confValue');
+    const smokeConfSlider = document.getElementById('smokeConfSlider');
+    const smokeConfValue = document.getElementById('smokeConfValue');
+    const fireConfSlider = document.getElementById('fireConfSlider');
+    const fireConfValue = document.getElementById('fireConfValue');
     const modelSelect = document.getElementById('modelSelect');
     const processBtn = document.getElementById('processBtn');
     const btnSpinner = document.getElementById('btnSpinner');
@@ -813,17 +833,29 @@
     const downloadBtn = document.getElementById('downloadBtn');
     const resetBtn = document.getElementById('resetBtn');
 
-    // Confidence Slider handling
-    confSlider.addEventListener('input', (e) => {
+    // Dual Confidence Sliders handling
+    smokeConfSlider.addEventListener('input', (e) => {
       const val = parseFloat(e.target.value);
-      confValue.textContent = `${Math.round(val * 100)}%`;
+      smokeConfValue.textContent = `${Math.round(val * 100)}%`;
+    });
+
+    fireConfSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      fireConfValue.textContent = `${Math.round(val * 100)}%`;
     });
 
     document.querySelectorAll('.preset-chip').forEach(chip => {
       chip.addEventListener('click', () => {
-        const val = parseFloat(chip.dataset.val);
-        confSlider.value = val;
-        confValue.textContent = `${Math.round(val * 100)}%`;
+        const sVal = parseFloat(chip.dataset.smoke);
+        const fVal = parseFloat(chip.dataset.fire);
+        if (!isNaN(sVal)) {
+          smokeConfSlider.value = sVal;
+          smokeConfValue.textContent = `${Math.round(sVal * 100)}%`;
+        }
+        if (!isNaN(fVal)) {
+          fireConfSlider.value = fVal;
+          fireConfValue.textContent = `${Math.round(fVal * 100)}%`;
+        }
       });
     });
 
@@ -898,7 +930,8 @@
     processBtn.addEventListener('click', async () => {
       if (!selectedFile && !selectedSample) return;
 
-      const conf = parseFloat(confSlider.value);
+      const confSmoke = parseFloat(smokeConfSlider.value);
+      const confFire = parseFloat(fireConfSlider.value);
       const model = modelSelect.value;
 
       // UI state: processing
@@ -921,7 +954,9 @@
         if (selectedFile) {
           const formData = new FormData();
           formData.append('video', selectedFile);
-          formData.append('confidence', conf);
+          formData.append('conf_smoke', confSmoke);
+          formData.append('conf_fire', confFire);
+          formData.append('confidence', confFire);
           formData.append('model_type', model);
           res = await fetch('/api/process', {
             method: 'POST',
@@ -930,7 +965,9 @@
         } else if (selectedSample) {
           const formData = new FormData();
           formData.append('sample_name', selectedSample);
-          formData.append('confidence', conf);
+          formData.append('conf_smoke', confSmoke);
+          formData.append('conf_fire', confFire);
+          formData.append('confidence', confFire);
           formData.append('model_type', model);
           res = await fetch('/api/process_sample', {
             method: 'POST',

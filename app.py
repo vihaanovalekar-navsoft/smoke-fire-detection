@@ -164,7 +164,7 @@ def load_detection_model(model_key: str = "sota_5ep"):
 # In-memory Job Tracking
 jobs: Dict[str, Dict[str, Any]] = {}
 
-def draw_hud(frame, frame_idx, total_frames, num_smoke, num_fire, conf_thresh, model_label):
+def draw_hud(frame, frame_idx, total_frames, num_smoke, num_fire, conf_smoke, conf_fire, model_label):
     h, w = frame.shape[:2]
     hud_h = max(44, int(h * 0.05))
     overlay = frame.copy()
@@ -175,11 +175,9 @@ def draw_hud(frame, frame_idx, total_frames, num_smoke, num_fire, conf_thresh, m
     font_scale = max(0.42, w / 1700.0)
     font_thick = max(1, int(round(font_scale * 1.8)))
 
-    # Title & model info
-    if "512" in model_label or "Small" in model_label:
-        title_text = f"RF-DETR Small (512x512) + DoRA | Conf >= {conf_thresh*100:.0f}%"
-    else:
-        title_text = f"RF-DETR Nano + DoRA ({model_label}) | Conf >= {conf_thresh*100:.0f}%"
+    # Title & model info with separate smoke and fire thresholds
+    arch_info = "RF-DETR Small (512x512)" if ("512" in model_label or "Small" in model_label) else f"RF-DETR Nano ({model_label})"
+    title_text = f"{arch_info} | Smoke >= {conf_smoke*100:.0f}% | Fire >= {conf_fire*100:.0f}%"
     cv2.putText(
         frame,
         title_text,
@@ -261,7 +259,8 @@ def process_video_worker(
     job_id: str,
     input_path: str,
     output_path: str,
-    confidence_thresh: float,
+    conf_smoke: float,
+    conf_fire: float,
     model_type: str,
     iou_thresh: float = 0.35,
     batch_size: int = 8,
@@ -331,7 +330,8 @@ def process_video_worker(
                     f_boxes = pred_boxes[b_idx]
                     scores, labels = f_logits.max(dim=-1)
 
-                    keep = scores >= confidence_thresh
+                    # Per-class thresholding: Smoke (0) >= conf_smoke, Fire (1) >= conf_fire
+                    keep = ((labels == 0) & (scores >= conf_smoke)) | ((labels == 1) & (scores >= conf_fire))
                     k_scores = scores[keep]
                     k_labels = labels[keep]
                     k_boxes = f_boxes[keep]
@@ -367,7 +367,7 @@ def process_video_worker(
                     total_fire_boxes += num_fire
 
                     draw_detections(f_orig, detections, width, height)
-                    draw_hud(f_orig, processed_count + 1, total_frames, num_smoke, num_fire, confidence_thresh, model_label)
+                    draw_hud(f_orig, processed_count + 1, total_frames, num_smoke, num_fire, conf_smoke, conf_fire, model_label)
                     writer.write(f_orig)
                     processed_count += 1
 
@@ -397,7 +397,8 @@ def process_video_worker(
                 f_logits = logits[b_idx]
                 f_boxes = pred_boxes[b_idx]
                 scores, labels = f_logits.max(dim=-1)
-                keep = scores >= confidence_thresh
+                # Per-class thresholding: Smoke (0) >= conf_smoke, Fire (1) >= conf_fire
+                keep = ((labels == 0) & (scores >= conf_smoke)) | ((labels == 1) & (scores >= conf_fire))
                 k_scores = scores[keep]
                 k_labels = labels[keep]
                 k_boxes = f_boxes[keep]
@@ -432,7 +433,7 @@ def process_video_worker(
                 total_fire_boxes += num_fire
 
                 draw_detections(f_orig, detections, width, height)
-                draw_hud(f_orig, processed_count + 1, total_frames, num_smoke, num_fire, confidence_thresh, model_label)
+                draw_hud(f_orig, processed_count + 1, total_frames, num_smoke, num_fire, conf_smoke, conf_fire, model_label)
                 writer.write(f_orig)
                 processed_count += 1
 
@@ -547,12 +548,17 @@ async def clear_vram():
 @app.post("/api/process")
 async def start_processing(
     video: UploadFile = File(...),
-    confidence: float = Form(0.40),
+    conf_smoke: Optional[float] = Form(None),
+    conf_fire: Optional[float] = Form(None),
+    confidence: Optional[float] = Form(None),
     model_type: str = Form("sota_5ep"),
     iou_thresh: float = Form(0.35),
 ):
-    if not (0.01 <= confidence <= 0.99):
-        raise HTTPException(status_code=400, detail="Confidence threshold must be between 0.01 and 0.99")
+    smoke_th = conf_smoke if conf_smoke is not None else (confidence if confidence is not None else 0.35)
+    fire_th = conf_fire if conf_fire is not None else (confidence if confidence is not None else 0.40)
+
+    if not (0.01 <= smoke_th <= 0.99) or not (0.01 <= fire_th <= 0.99):
+        raise HTTPException(status_code=400, detail="Confidence thresholds must be between 0.01 and 0.99")
 
     job_id = str(uuid.uuid4())
     safe_name = os.path.splitext(video.filename)[0].replace(" ", "_")
@@ -566,7 +572,9 @@ async def start_processing(
     jobs[job_id] = {
         "job_id": job_id,
         "filename": video.filename,
-        "confidence": confidence,
+        "conf_smoke": smoke_th,
+        "conf_fire": fire_th,
+        "confidence": round((smoke_th + fire_th) / 2.0, 2),
         "model_type": model_type,
         "status": "pending",
         "progress": 0.0,
@@ -581,7 +589,7 @@ async def start_processing(
 
     t = threading.Thread(
         target=process_video_worker,
-        args=(job_id, input_file_path, output_file_path, confidence, model_type, iou_thresh),
+        args=(job_id, input_file_path, output_file_path, smoke_th, fire_th, model_type, iou_thresh),
         daemon=True,
     )
     t.start()
@@ -591,13 +599,21 @@ async def start_processing(
 @app.post("/api/process_sample")
 async def start_processing_sample(
     sample_name: str = Form(...),
-    confidence: float = Form(0.40),
+    conf_smoke: Optional[float] = Form(None),
+    conf_fire: Optional[float] = Form(None),
+    confidence: Optional[float] = Form(None),
     model_type: str = Form("sota_5ep"),
     iou_thresh: float = Form(0.35),
 ):
     sample_path = os.path.join(VIDEOS_DIR, sample_name)
     if not os.path.exists(sample_path):
         raise HTTPException(status_code=404, detail="Sample video not found")
+
+    smoke_th = conf_smoke if conf_smoke is not None else (confidence if confidence is not None else 0.35)
+    fire_th = conf_fire if conf_fire is not None else (confidence if confidence is not None else 0.40)
+
+    if not (0.01 <= smoke_th <= 0.99) or not (0.01 <= fire_th <= 0.99):
+        raise HTTPException(status_code=400, detail="Confidence thresholds must be between 0.01 and 0.99")
 
     job_id = str(uuid.uuid4())
     safe_name = os.path.splitext(sample_name)[0].replace(" ", "_")
@@ -606,7 +622,9 @@ async def start_processing_sample(
     jobs[job_id] = {
         "job_id": job_id,
         "filename": sample_name,
-        "confidence": confidence,
+        "conf_smoke": smoke_th,
+        "conf_fire": fire_th,
+        "confidence": round((smoke_th + fire_th) / 2.0, 2),
         "model_type": model_type,
         "status": "pending",
         "progress": 0.0,
@@ -621,7 +639,7 @@ async def start_processing_sample(
 
     t = threading.Thread(
         target=process_video_worker,
-        args=(job_id, sample_path, output_file_path, confidence, model_type, iou_thresh),
+        args=(job_id, sample_path, output_file_path, smoke_th, fire_th, model_type, iou_thresh),
         daemon=True,
     )
     t.start()
