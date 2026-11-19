@@ -363,6 +363,18 @@
       color: var(--text-main);
     }
 
+    .preset-chip.smoke-chip:hover {
+      border-color: rgba(0, 229, 255, 0.4);
+      background: rgba(0, 229, 255, 0.1);
+      color: var(--accent-smoke);
+    }
+
+    .preset-chip.fire-chip:hover {
+      border-color: rgba(255, 77, 46, 0.4);
+      background: rgba(255, 77, 46, 0.1);
+      color: var(--accent-fire);
+    }
+
     /* Dropdown */
     select {
       background: rgba(14, 17, 24, 0.9);
@@ -684,8 +696,8 @@
       <div class="control-group">
         <label class="control-label">2. Confidence Thresholds (Smoke & Fire)</label>
         
-        <!-- Smoke Confidence Slider -->
-        <div style="margin-bottom: 12px; background: rgba(0, 229, 255, 0.03); border: 1px solid rgba(0, 229, 255, 0.18); border-radius: 12px; padding: 12px 14px;">
+        <!-- Smoke Confidence Slider & Separate Chips -->
+        <div style="margin-bottom: 14px; background: rgba(0, 229, 255, 0.03); border: 1px solid rgba(0, 229, 255, 0.18); border-radius: 12px; padding: 12px 14px;">
           <div class="control-header" style="margin-bottom: 8px;">
             <span style="font-size: 0.85rem; font-weight: 600; color: var(--accent-smoke); display: flex; align-items: center; gap: 6px;">
               <span>💨</span> Smoke Threshold
@@ -693,9 +705,15 @@
             <span class="confidence-badge" id="smokeConfValue" style="background: rgba(0, 229, 255, 0.15); color: var(--accent-smoke); border-color: rgba(0, 229, 255, 0.3);">35%</span>
           </div>
           <input type="range" id="smokeConfSlider" min="0.05" max="0.95" step="0.01" value="0.35" style="accent-color: var(--accent-smoke);" />
+          <div class="confidence-presets" style="margin-top: 8px;">
+            <button class="preset-chip smoke-chip" type="button" data-val="0.25">25% (Faint Haze)</button>
+            <button class="preset-chip smoke-chip" type="button" data-val="0.40">40% (Standard)</button>
+            <button class="preset-chip smoke-chip" type="button" data-val="0.60">60% (Dense Plume)</button>
+            <button class="preset-chip smoke-chip" type="button" data-val="0.75">75% (Strict)</button>
+          </div>
         </div>
 
-        <!-- Fire Confidence Slider -->
+        <!-- Fire Confidence Slider & Separate Chips -->
         <div style="background: rgba(255, 77, 46, 0.03); border: 1px solid rgba(255, 77, 46, 0.18); border-radius: 12px; padding: 12px 14px;">
           <div class="control-header" style="margin-bottom: 8px;">
             <span style="font-size: 0.85rem; font-weight: 600; color: var(--accent-fire); display: flex; align-items: center; gap: 6px;">
@@ -704,12 +722,12 @@
             <span class="confidence-badge" id="fireConfValue" style="background: rgba(255, 77, 46, 0.15); color: var(--accent-fire); border-color: rgba(255, 77, 46, 0.3);">40%</span>
           </div>
           <input type="range" id="fireConfSlider" min="0.05" max="0.95" step="0.01" value="0.40" style="accent-color: var(--accent-fire);" />
-        </div>
-
-        <div class="confidence-presets" style="margin-top: 10px;">
-          <button class="preset-chip" type="button" data-smoke="0.25" data-fire="0.30">Sensitive (25% / 30%)</button>
-          <button class="preset-chip" type="button" data-smoke="0.35" data-fire="0.40">Balanced (35% / 40%)</button>
-          <button class="preset-chip" type="button" data-smoke="0.50" data-fire="0.60">Strict (50% / 60%)</button>
+          <div class="confidence-presets" style="margin-top: 8px;">
+            <button class="preset-chip fire-chip" type="button" data-val="0.25">25% (Spark)</button>
+            <button class="preset-chip fire-chip" type="button" data-val="0.40">40% (Standard)</button>
+            <button class="preset-chip fire-chip" type="button" data-val="0.55">55% (Flame)</button>
+            <button class="preset-chip fire-chip" type="button" data-val="0.70">70% (Strict)</button>
+          </div>
         </div>
       </div>
 
@@ -844,17 +862,24 @@
       fireConfValue.textContent = `${Math.round(val * 100)}%`;
     });
 
-    document.querySelectorAll('.preset-chip').forEach(chip => {
+    // Smoke separate preset chips
+    document.querySelectorAll('.smoke-chip').forEach(chip => {
       chip.addEventListener('click', () => {
-        const sVal = parseFloat(chip.dataset.smoke);
-        const fVal = parseFloat(chip.dataset.fire);
-        if (!isNaN(sVal)) {
-          smokeConfSlider.value = sVal;
-          smokeConfValue.textContent = `${Math.round(sVal * 100)}%`;
+        const val = parseFloat(chip.dataset.val);
+        if (!isNaN(val)) {
+          smokeConfSlider.value = val;
+          smokeConfValue.textContent = `${Math.round(val * 100)}%`;
         }
-        if (!isNaN(fVal)) {
-          fireConfSlider.value = fVal;
-          fireConfValue.textContent = `${Math.round(fVal * 100)}%`;
+      });
+    });
+
+    // Fire separate preset chips
+    document.querySelectorAll('.fire-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const val = parseFloat(chip.dataset.val);
+        if (!isNaN(val)) {
+          fireConfSlider.value = val;
+          fireConfValue.textContent = `${Math.round(val * 100)}%`;
         }
       });
     });
