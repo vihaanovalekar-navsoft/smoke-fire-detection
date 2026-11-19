@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smoke & Fire Detection Studio | RF-DETR + DoRA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0a0c10;
+      --card-bg: rgba(18, 22, 31, 0.75);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --accent-fire: #ff4d2e;
+      --accent-fire-glow: rgba(255, 77, 46, 0.35);
+      --accent-smoke: #00d2ff;
+      --accent-smoke-glow: rgba(0, 210, 255, 0.35);
+      --text-main: #f0f3f8;
+      --text-muted: #8b949e;
+      --success: #10b981;
+      --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 15% 20%, rgba(255, 77, 46, 0.08) 0%, transparent 45%),
+        radial-gradient(circle at 85% 80%, rgba(0, 210, 255, 0.06) 0%, transparent 45%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* Header */
+    header {
+      padding: 24px 36px;
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(12px);
+      background: rgba(10, 12, 16, 0.6);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #ff4d2e, #ff8c00);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 24px var(--accent-fire-glow);
+      font-size: 22px;
+    }
+
+    .brand-title {
+      font-size: 1.25rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      background: rgba(255, 77, 46, 0.15);
+      color: var(--accent-fire);
+      border: 1px solid rgba(255, 77, 46, 0.3);
+      padding: 2px 8px;
+      border-radius: 20px;
+      text-transform: uppercase;
+    }
+
+    .header-tags {
+      display: flex;
+      gap: 12px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+    }
+
+    .tag {
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+    }
+    .tag.active {
+      color: var(--success);
+      border-color: rgba(16, 185, 129, 0.3);
+      background: rgba(16, 185, 129, 0.08);
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      max-width: 1360px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 36px 24px 64px;
+      display: grid;
+      grid-template-columns: 460px 1fr;
+      gap: 32px;
+    }
+
+    @media (max-width: 1024px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Panels */
+    .panel {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 28px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 16px;
+    }
+
+    .panel-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Upload Area */
+    .dropzone {
+      border: 2px dashed rgba(255, 255, 255, 0.15);
+      border-radius: 16px;
+      padding: 36px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      background: rgba(255, 255, 255, 0.02);
+      position: relative;
+    }
+
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--accent-fire);
+      background: rgba(255, 77, 46, 0.05);
+      box-shadow: 0 0 28px rgba(255, 77, 46, 0.15);
+    }
+
+    .dropzone-icon {
+      font-size: 40px;
+      margin-bottom: 12px;
+    }
+
+    .dropzone-text {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .dropzone-subtext {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    #fileInput {
+      display: none;
+    }
+
+    .file-pill {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+    }
+
+    .file-pill.visible {
+      display: flex;
+    }
+
+    .file-pill-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .file-pill-remove {
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: color 0.2s;
+    }
+    .file-pill-remove:hover {
+      color: #ff4d4d;
+    }
+
+    /* Samples selector */
+    .samples-box {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .samples-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+
+    .samples-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sample-btn {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: all 0.2s ease;
+    }
+
+    .sample-btn:hover {
+      background: rgba(255, 77, 46, 0.1);
+      border-color: rgba(255, 77, 46, 0.3);
+      color: #fff;
+    }
+
+    .sample-btn.selected {
+      border-color: var(--accent-fire);
+      background: rgba(255, 77, 46, 0.15);
+      box-shadow: 0 0 16px var(--accent-fire-glow);
+    }
+
+    /* Controls */
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .control-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .control-label {
+      font-size: 0.88rem;
+      font-weight: 600;
+    }
+
+    .confidence-badge {
+      font-family: var(--font-mono);
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--accent-fire);
+      background: rgba(255, 77, 46, 0.12);
+      border: 1px solid rgba(255, 77, 46, 0.3);
+      padding: 2px 10px;
+      border-radius: 8px;
+    }
+
+    /* Slider */
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 8px;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.1);
+      outline: none;
+      transition: background 0.2s;
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--accent-fire);
+      cursor: pointer;
+      box-shadow: 0 0 14px var(--accent-fire-glow);
+      transition: transform 0.15s ease;
+    }
+
+    input[type=range]::-webkit-slider-thumb:hover {
+      transform: scale(1.15);
+    }
+
+    .confidence-presets {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .preset-chip {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 6px 8px;
+      font-size: 0.75rem;
+      border-radius: 8px;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s;
+    }
+
+    .preset-chip:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+    }
+
+    /* Dropdown */
+    select {
+      background: rgba(14, 17, 24, 0.9);
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    select:focus {
+      border-color: var(--accent-fire);
+    }
+
+    /* Process Button */
+    .btn-process {
+      background: linear-gradient(135deg, #ff4d2e, #e03211);
+      color: white;
+      border: none;
+      padding: 16px 24px;
+      border-radius: 14px;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      box-shadow: 0 8px 24px var(--accent-fire-glow);
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .btn-process:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 32px rgba(255, 77, 46, 0.5);
+    }
+
+    .btn-process:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+
+    /* Right Preview Area */
+    .display-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* Progress Box */
+    .progress-box {
+      display: none;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 20px;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .progress-box.active {
+      display: flex;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-bar-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #ff4d2e, #ffaa00);
+      border-radius: 8px;
+      transition: width 0.3s ease;
+      box-shadow: 0 0 16px var(--accent-fire-glow);
+    }
+
+    .progress-telemetry {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 4px;
+    }
+
+    .telemetry-card {
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 10px 14px;
+      border-radius: 10px;
+      text-align: center;
+    }
+
+    .telemetry-val {
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .telemetry-lbl {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+    }
+
+    /* Video Player Viewport */
+    .viewport {
+      background: #000;
+      border-radius: 18px;
+      border: 1px solid var(--card-border);
+      min-height: 480px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+    }
+
+    .viewport-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      color: var(--text-muted);
+      padding: 40px;
+      text-align: center;
+    }
+
+    .viewport-placeholder-icon {
+      font-size: 52px;
+      opacity: 0.3;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      max-height: 640px;
+      object-fit: contain;
+      border-radius: 18px;
+      display: none;
+    }
+
+    video.active {
+      display: block;
+    }
+
+    /* Results Action bar */
+    .results-bar {
+      display: none;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      padding: 16px 20px;
+      border-radius: 14px;
+    }
+
+    .results-bar.active {
+      display: flex;
+    }
+
+    .btn-download {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+
+    .btn-download:hover {
+      background: var(--success);
+      color: #fff;
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+    }
+
+    .btn-reset {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--card-border);
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-reset:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+    }
+
+    /* Spinner */
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: none;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .badge-smoke {
+      color: var(--accent-smoke);
+    }
+    .badge-fire {
+      color: var(--accent-fire);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">🔥</div>
+      <div>
+        <div class="brand-title">
+          Smoke & Fire Detection Studio
+          <span class="brand-badge">RF-DETR + DoRA</span>
+        </div>
+      </div>
+    </div>
+    <div class="header-tags">
+      <span class="tag active">⚡ PyTorch CUDA Accelerated</span>
+      <span class="tag">Peft: DoRA r=16</span>
+      <span class="tag">D-Fire Dataset</span>
+    </div>
+  </header>
+
+  <!-- Main Grid -->
+  <main>
+    <!-- Left Configuration Panel -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">
+          <span>⚙️</span> Video & Inference Settings
+        </h2>
+      </div>
+
+      <!-- File Dropzone -->
+      <div class="control-group">
+        <label class="control-label">1. Select or Upload Video</label>
+        <div class="dropzone" id="dropzone">
+          <div class="dropzone-icon">📹</div>
+          <div class="dropzone-text">Click to choose or drag & drop video</div>
+          <div class="dropzone-subtext">Supports MP4, AVI, MOV, MKV (H.264 / AAC)</div>
+          <input type="file" id="fileInput" accept="video/*" />
+        </div>
+
+        <div class="file-pill" id="filePill">
+          <div class="file-pill-left">
+            <span>🎬</span>
+            <span id="fileName">video.mp4</span>
+            <span id="fileSize" style="color: var(--text-muted); font-size: 0.75rem;">(4.2 MB)</span>
+          </div>
+          <span class="file-pill-remove" id="removeFileBtn" title="Remove video">✕</span>
+        </div>
+      </div>
+
+      <!-- Quick Samples -->
+      <div class="samples-box">
+        <span class="samples-label">Or choose a preloaded benchmark sample:</span>
+        <div class="samples-list" id="samplesContainer">
+          <button class="sample-btn" data-sample="Oak Grove, MN house fire.mp4">
+            <span>🏠 Oak Grove House Fire</span>
+            <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">0.86 MB</span>
+          </button>
+          <button class="sample-btn" data-sample="Satellite captures smoke plume from Utah’s Cottonwood Fire.mp4">
+            <span>🛰️ Utah Cottonwood Satellite Fire</span>
+            <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">6.87 MB</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Confidence Setting -->
+      <div class="control-group">
+        <div class="control-header">
+          <label class="control-label" for="confSlider">2. Detection Confidence Threshold</label>
+          <span class="confidence-badge" id="confValue">40%</span>
+        </div>
+        <input type="range" id="confSlider" min="0.05" max="0.95" step="0.01" value="0.40" />
+        
+        <div class="confidence-presets">
+          <button class="preset-chip" type="button" data-val="0.25">0.25 (Sensitive)</button>
+          <button class="preset-chip" type="button" data-val="0.40">0.40 (Balanced)</button>
+          <button class="preset-chip" type="button" data-val="0.60">0.60 (Strict)</button>
+        </div>
+      </div>
+
+      <!-- Model Selector -->
+      <div class="control-group">
+        <label class="control-label" for="modelSelect">3. Inference Model Checkpoint</label>
+        <select id="modelSelect">
+          <option value="sota_5ep" selected>RF-DETR Nano + DoRA (5-Epoch SOTA Color - Val Loss 0.7697)</option>
+          <option value="gray_3ep">RF-DETR Nano + DoRA (3-Epoch Grayscale Baseline - Val Loss 1.6978)</option>
+        </select>
+      </div>
+
+      <!-- Process Button -->
+      <button class="btn-process" id="processBtn" disabled>
+        <div class="spinner" id="btnSpinner"></div>
+        <span id="btnIcon">🚀</span>
+        <span id="btnText">Process Video</span>
+      </button>
+    </div>
+
+    <!-- Right Display & Results Panel -->
+    <div class="display-panel">
+      <!-- Progress Bar & Telemetry -->
+      <div class="progress-box" id="progressBox">
+        <div class="progress-header">
+          <span id="progressStatusText">Analyzing video frames with RF-DETR...</span>
+          <span id="progressPctText" style="font-family: var(--font-mono); font-weight: 700; color: var(--accent-fire);">0%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progressBarFill"></div>
+        </div>
+
+        <div class="progress-telemetry">
+          <div class="telemetry-card">
+            <div class="telemetry-val" id="telemetryFrames">0 / 0</div>
+            <div class="telemetry-lbl">Frames</div>
+          </div>
+          <div class="telemetry-card">
+            <div class="telemetry-val" id="telemetryFps">0.0</div>
+            <div class="telemetry-lbl">FPS Rate</div>
+          </div>
+          <div class="telemetry-card">
+            <div class="telemetry-val badge-smoke" id="telemetrySmoke">0</div>
+            <div class="telemetry-lbl">Smoke Plumes</div>
+          </div>
+          <div class="telemetry-card">
+            <div class="telemetry-val badge-fire" id="telemetryFire">0</div>
+            <div class="telemetry-lbl">Fire Points</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Video Viewport -->
+      <div class="viewport" id="viewport">
+        <div class="viewport-placeholder" id="placeholder">
+          <div class="viewport-placeholder-icon">🔥</div>
+          <div style="font-size: 1.1rem; font-weight: 600;">No Processed Video Yet</div>
+          <div style="font-size: 0.85rem; max-width: 320px;">Upload a video or pick a benchmark sample on the left, adjust your confidence threshold, and click Process Video.</div>
+        </div>
+        <video id="videoPlayer" controls playsinline></video>
+      </div>
+
+      <!-- Results Action Bar -->
+      <div class="results-bar" id="resultsBar">
+        <div>
+          <span style="font-weight: 700; color: var(--success); display: inline-flex; align-items: center; gap: 6px;">
+            <span>✓</span> Inference Finished
+          </span>
+          <span style="color: var(--text-muted); font-size: 0.85rem; margin-left: 10px;" id="resultsSummary">
+            (211 frames in 18.2s @ 11.6 FPS)
+          </span>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <a class="btn-download" id="downloadBtn" download>
+            <span>📥</span> Download Processed MP4
+          </a>
+          <button class="btn-reset" id="resetBtn">Process Another</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // State
+    let selectedFile = null;
+    let selectedSample = null;
+    let currentJobId = null;
+    let pollInterval = null;
+
+    // Elements
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const filePill = document.getElementById('filePill');
+    const fileName = document.getElementById('fileName');
+    const fileSize = document.getElementById('fileSize');
+    const removeFileBtn = document.getElementById('removeFileBtn');
+    const samplesContainer = document.getElementById('samplesContainer');
+    const confSlider = document.getElementById('confSlider');
+    const confValue = document.getElementById('confValue');
+    const modelSelect = document.getElementById('modelSelect');
+    const processBtn = document.getElementById('processBtn');
+    const btnSpinner = document.getElementById('btnSpinner');
+    const btnIcon = document.getElementById('btnIcon');
+    const btnText = document.getElementById('btnText');
+    const progressBox = document.getElementById('progressBox');
+    const progressStatusText = document.getElementById('progressStatusText');
+    const progressPctText = document.getElementById('progressPctText');
+    const progressBarFill = document.getElementById('progressBarFill');
+    const telemetryFrames = document.getElementById('telemetryFrames');
+    const telemetryFps = document.getElementById('telemetryFps');
+    const telemetrySmoke = document.getElementById('telemetrySmoke');
+    const telemetryFire = document.getElementById('telemetryFire');
+    const viewport = document.getElementById('viewport');
+    const placeholder = document.getElementById('placeholder');
+    const videoPlayer = document.getElementById('videoPlayer');
+    const resultsBar = document.getElementById('resultsBar');
+    const resultsSummary = document.getElementById('resultsSummary');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const resetBtn = document.getElementById('resetBtn');
+
+    // Confidence Slider handling
+    confSlider.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      confValue.textContent = `${Math.round(val * 100)}%`;
+    });
+
+    document.querySelectorAll('.preset-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const val = parseFloat(chip.dataset.val);
+        confSlider.value = val;
+        confValue.textContent = `${Math.round(val * 100)}%`;
+      });
+    });
+
+    // File Drag & Drop
+    dropzone.addEventListener('click', () => fileInput.click());
+
+    ['dragenter', 'dragover'].forEach(name => {
+      dropzone.addEventListener(name, (e) => {
+        e.preventDefault();
+        dropzone.classList.add('dragover');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(name => {
+      dropzone.addEventListener(name, (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dragover');
+      });
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleFileSelect(e.dataTransfer.files[0]);
+      }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        handleFileSelect(e.target.files[0]);
+      }
+    });
+
+    function handleFileSelect(file) {
+      selectedFile = file;
+      selectedSample = null;
+      document.querySelectorAll('.sample-btn').forEach(b => b.classList.remove('selected'));
+
+      fileName.textContent = file.name;
+      fileSize.textContent = `(${(file.size / (1024 * 1024)).toFixed(1)} MB)`;
+      filePill.classList.add('visible');
+      dropzone.style.display = 'none';
+      processBtn.disabled = false;
+    }
+
+    removeFileBtn.addEventListener('click', () => {
+      selectedFile = null;
+      fileInput.value = '';
+      filePill.classList.remove('visible');
+      dropzone.style.display = 'block';
+      if (!selectedSample) {
+        processBtn.disabled = true;
+      }
+    });
+
+    // Sample video handling
+    document.querySelectorAll('.sample-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const sampleName = btn.dataset.sample;
+        selectedSample = sampleName;
+        selectedFile = null;
+        fileInput.value = '';
+        filePill.classList.remove('visible');
+        dropzone.style.display = 'block';
+
+        document.querySelectorAll('.sample-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        processBtn.disabled = false;
+      });
+    });
+
+    // Process Button Click Handler
+    processBtn.addEventListener('click', async () => {
+      if (!selectedFile && !selectedSample) return;
+
+      const conf = parseFloat(confSlider.value);
+      const model = modelSelect.value;
+
+      // UI state: processing
+      processBtn.disabled = true;
+      btnSpinner.style.display = 'block';
+      btnIcon.style.display = 'none';
+      btnText.textContent = 'Processing...';
+
+      progressBox.classList.add('active');
+      progressBarFill.style.width = '2%';
+      progressPctText.textContent = '0%';
+      progressStatusText.textContent = 'Preparing video stream and initializing model...';
+
+      placeholder.style.display = 'none';
+      videoPlayer.classList.remove('active');
+      resultsBar.classList.remove('active');
+
+      try {
+        let res;
+        if (selectedFile) {
+          const formData = new FormData();
+          formData.append('video', selectedFile);
+          formData.append('confidence', conf);
+          formData.append('model_type', model);
+          res = await fetch('/api/process', {
+            method: 'POST',
+            body: formData,
+          });
+        } else if (selectedSample) {
+          const formData = new FormData();
+          formData.append('sample_name', selectedSample);
+          formData.append('confidence', conf);
+          formData.append('model_type', model);
+          res = await fetch('/api/process_sample', {
+            method: 'POST',
+            body: formData,
+          });
+        }
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to start processing');
+        }
+
+        currentJobId = data.job_id;
+        startPolling(currentJobId);
+
+      } catch (err) {
+        alert(`Error: ${err.message}`);
+        resetProcessBtn();
+      }
+    });
+
+    // Polling job status
+    function startPolling(jobId) {
+      if (pollInterval) clearInterval(pollInterval);
+
+      pollInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/status/${jobId}`);
+          if (!res.ok) return;
+          const job = await res.json();
+
+          // Update Progress Bar & Telemetry
+          progressBarFill.style.width = `${job.progress}%`;
+          progressPctText.textContent = `${Math.round(job.progress)}%`;
+          progressStatusText.textContent = job.message || 'Processing frames...';
+
+          telemetryFrames.textContent = `${job.current_frame || 0} / ${job.total_frames || 0}`;
+          telemetryFps.textContent = job.process_fps ? `${job.process_fps}` : (job.avg_fps ? `${job.avg_fps}` : '0.0');
+          telemetrySmoke.textContent = `${job.smoke_detections || 0}`;
+          telemetryFire.textContent = `${job.fire_detections || 0}`;
+
+          if (job.status === 'completed') {
+            clearInterval(pollInterval);
+            handleCompletion(jobId, job);
+          } else if (job.status === 'failed') {
+            clearInterval(pollInterval);
+            alert(`Processing failed: ${job.error}`);
+            resetProcessBtn();
+          }
+        } catch (e) {
+          console.error('Polling error', e);
+        }
+      }, 500);
+    }
+
+    function handleCompletion(jobId, job) {
+      resetProcessBtn();
+      progressBox.classList.remove('active');
+
+      const videoUrl = `/api/video/${jobId}?t=${Date.now()}`;
+      videoPlayer.src = videoUrl;
+      videoPlayer.classList.add('active');
+      videoPlayer.load();
+      videoPlayer.play().catch(() => {});
+
+      downloadBtn.href = videoUrl;
+      resultsSummary.textContent = `(${job.current_frame} frames in ${job.total_time}s @ ${job.avg_fps} FPS • ${job.output_size_mb} MB)`;
+      resultsBar.classList.add('active');
+    }
+
+    function resetProcessBtn() {
+      processBtn.disabled = false;
+      btnSpinner.style.display = 'none';
+      btnIcon.style.display = 'inline-block';
+      btnText.textContent = 'Process Video';
+    }
+
+    resetBtn.addEventListener('click', () => {
+      videoPlayer.pause();
+      videoPlayer.classList.remove('active');
+      resultsBar.classList.remove('active');
+      placeholder.style.display = 'flex';
+    });
+  </script>
+</body>
+</html>

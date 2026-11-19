@@ -11,6 +11,7 @@ test/
 
 # Generated visual outputs & inference plots
 outputs/
+uploads/
 
 # Antigravity & OS metadata
 .system_generated/
