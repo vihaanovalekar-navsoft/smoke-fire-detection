@@ -622,7 +622,10 @@
       </div>
     </div>
     <div class="header-tags">
-      <span class="tag active">⚡ PyTorch CUDA Accelerated</span>
+      <span class="tag active" id="vramBadge">⚡ VRAM: checking...</span>
+      <button class="tag" id="clearVramBtn" style="cursor: pointer; background: rgba(255, 77, 46, 0.1); border-color: rgba(255, 77, 46, 0.3); color: #ff8c00; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;" title="Purge cached models and empty GPU VRAM cache">
+        <span>🧹</span> Clear VRAM
+      </button>
       <span class="tag">Peft: DoRA r=16</span>
       <span class="tag">D-Fire Dataset</span>
     </div>
@@ -1006,6 +1009,48 @@
       resultsBar.classList.remove('active');
       placeholder.style.display = 'flex';
     });
+
+    // VRAM Telemetry & Clear VRAM Handler
+    const vramBadge = document.getElementById('vramBadge');
+    const clearVramBtn = document.getElementById('clearVramBtn');
+
+    async function updateVramTelemetry() {
+      try {
+        const res = await fetch('/api/vram_status');
+        if (!res.ok) return;
+        const d = await res.json();
+        if (d.cuda) {
+          vramBadge.textContent = `⚡ VRAM: ${d.reserved_mb} / ${d.total_mb} MB (${d.free_mb} MB free)`;
+        } else {
+          vramBadge.textContent = `⚡ Running on CPU`;
+        }
+      } catch (e) {
+        console.warn('VRAM fetch error', e);
+      }
+    }
+
+    clearVramBtn.addEventListener('click', async () => {
+      const origText = clearVramBtn.innerHTML;
+      clearVramBtn.innerHTML = '<span>⏳</span> Purging...';
+      clearVramBtn.disabled = true;
+      try {
+        const res = await fetch('/api/clear_vram', { method: 'POST' });
+        const d = await res.json();
+        await updateVramTelemetry();
+        clearVramBtn.innerHTML = '<span>✓</span> Cleared!';
+        setTimeout(() => {
+          clearVramBtn.innerHTML = origText;
+          clearVramBtn.disabled = false;
+        }, 1500);
+      } catch (err) {
+        alert('Failed to clear VRAM: ' + err.message);
+        clearVramBtn.innerHTML = origText;
+        clearVramBtn.disabled = false;
+      }
+    });
+
+    updateVramTelemetry();
+    setInterval(updateVramTelemetry, 4000);
   </script>
 </body>
 </html>

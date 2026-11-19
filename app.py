@@ -3,6 +3,7 @@ import sys
 import time
 import uuid
 import shutil
+import gc
 import threading
 import subprocess
 from typing import Optional, Dict, Any
@@ -421,6 +422,52 @@ def process_video_worker(
         jobs[job_id]["error"] = str(e)
         jobs[job_id]["message"] = f"Error processing video: {str(e)}"
         print(f"[SmokeFireAI ERROR] Job {job_id} failed: {e}", file=sys.stderr)
+    finally:
+        # Guarantee VRAM cache and temp tensor memory are purged after every inference job
+        if DEVICE == "cuda":
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+        gc.collect()
+
+# VRAM Management Endpoints
+@app.get("/api/vram_status")
+async def get_vram_status():
+    if not torch.cuda.is_available():
+        return JSONResponse({"cuda": False, "allocated_mb": 0, "reserved_mb": 0, "total_mb": 0, "free_mb": 0})
+    allocated = round(torch.cuda.memory_allocated() / (1024 * 1024), 1)
+    reserved = round(torch.cuda.memory_reserved() / (1024 * 1024), 1)
+    total = round(torch.cuda.get_device_properties(0).total_memory / (1024 * 1024), 1)
+    return JSONResponse({
+        "cuda": True,
+        "device_name": torch.cuda.get_device_name(0),
+        "allocated_mb": allocated,
+        "reserved_mb": reserved,
+        "total_mb": total,
+        "free_mb": round(total - reserved, 1),
+    })
+
+@app.post("/api/clear_vram")
+async def clear_vram():
+    global loaded_models
+    with model_lock:
+        loaded_models.clear()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+    gc.collect()
+
+    allocated = round(torch.cuda.memory_allocated() / (1024 * 1024), 1) if torch.cuda.is_available() else 0
+    reserved = round(torch.cuda.memory_reserved() / (1024 * 1024), 1) if torch.cuda.is_available() else 0
+    total = round(torch.cuda.get_device_properties(0).total_memory / (1024 * 1024), 1) if torch.cuda.is_available() else 0
+
+    return JSONResponse({
+        "status": "success",
+        "message": "VRAM and model cache completely purged.",
+        "allocated_mb": allocated,
+        "reserved_mb": reserved,
+        "total_mb": total,
+        "free_mb": round(total - reserved, 1) if torch.cuda.is_available() else 0,
+    })
 
 # API Endpoints
 @app.post("/api/process")
