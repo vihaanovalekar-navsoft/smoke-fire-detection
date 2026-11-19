@@ -104,6 +104,7 @@ def open_browser_delayed(url: str = "http://127.0.0.1:8000"):
 MODEL_PATHS = {
     "sota_5ep": os.path.join(BASE_DIR, "checkpoints", "best_rf_detr_dora.pt"),
     "small_512": os.path.join(BASE_DIR, "checkpoints", "best_rf_detr_small_dora.pt"),
+    "yolo11l": os.path.join(BASE_DIR, "checkpoints", "fire_and_smoke_yolo11L_V1.pt"),
     "gray_3ep": os.path.join(BASE_DIR, "checkpoints", "best_rf_detr_dora_3ep.pt"),
 }
 
@@ -112,6 +113,8 @@ loaded_processors: Dict[str, Any] = {}
 model_lock = threading.Lock()
 
 def get_processor(model_key: str = "sota_5ep"):
+    if "yolo" in model_key.lower():
+        return None
     global loaded_processors
     model_id = "Roboflow/rf-detr-small" if ("small" in model_key or "512" in model_key) else "Roboflow/rf-detr-nano"
     with model_lock:
@@ -125,6 +128,15 @@ def load_detection_model(model_key: str = "sota_5ep"):
     with model_lock:
         if model_key in loaded_models:
             return loaded_models[model_key]
+
+        if "yolo" in model_key.lower():
+            from ultralytics import YOLO
+            ckpt_path = MODEL_PATHS.get("yolo11l")
+            print(f"[SmokeFireAI] Loading YOLOv11 Large model from: {ckpt_path} onto {DEVICE}...")
+            model = YOLO(ckpt_path)
+            loaded_models[model_key] = model
+            print(f"[SmokeFireAI] Model '{model_key}' (YOLOv11 Large) successfully loaded.")
+            return model
 
         is_small = ("small" in model_key or "512" in model_key)
         model_id = "Roboflow/rf-detr-small" if is_small else "Roboflow/rf-detr-nano"
@@ -176,7 +188,12 @@ def draw_hud(frame, frame_idx, total_frames, num_smoke, num_fire, conf_smoke, co
     font_thick = max(1, int(round(font_scale * 1.8)))
 
     # Title & model info with separate smoke and fire thresholds
-    arch_info = "RF-DETR Small (512x512)" if ("512" in model_label or "Small" in model_label) else f"RF-DETR Nano ({model_label})"
+    if "yolo" in model_label.lower():
+        arch_info = "YOLOv11 Large"
+    elif "512" in model_label or "Small" in model_label:
+        arch_info = "RF-DETR Small (512x512)"
+    else:
+        arch_info = f"RF-DETR Nano ({model_label})"
     title_text = f"{arch_info} | Smoke >= {conf_smoke*100:.0f}% | Fire >= {conf_fire*100:.0f}%"
     cv2.putText(
         frame,
@@ -255,6 +272,80 @@ def draw_detections(frame, detections, width, height):
             cv2.LINE_AA,
         )
 
+def run_inference_on_batch(frames_buffer, model, processor, is_yolo, conf_smoke, conf_fire, iou_thresh, width, height):
+    frame_dets_list = []
+    if is_yolo:
+        min_th = min(conf_smoke, conf_fire)
+        yolo_dev = 0 if DEVICE == "cuda" else "cpu"
+        results = model.predict(frames_buffer, conf=min_th, iou=iou_thresh, device=yolo_dev, verbose=False)
+        for res in results:
+            dets = []
+            for box in res.boxes:
+                raw_name = model.names[int(box.cls[0])].lower()
+                c_id = 0 if "smoke" in raw_name else 1
+                score = float(box.conf[0])
+                if c_id == 0 and score < conf_smoke:
+                    continue
+                if c_id == 1 and score < conf_fire:
+                    continue
+                xyxy = [int(x) for x in box.xyxy[0].cpu().numpy()]
+                dets.append({
+                    "class_id": c_id,
+                    "score": score,
+                    "box": xyxy,
+                })
+            frame_dets_list.append(dets)
+    else:
+        pil_images = [
+            Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frames_buffer
+        ]
+        inputs = processor(images=pil_images, return_tensors="pt")
+        pixel_values = inputs["pixel_values"].to(DEVICE)
+
+        with torch.no_grad():
+            with torch.amp.autocast(DEVICE, dtype=torch.float16 if DEVICE == "cuda" else torch.bfloat16):
+                outputs = model(pixel_values=pixel_values)
+
+        logits = outputs.logits.sigmoid()
+        pred_boxes = outputs.pred_boxes
+
+        for b_idx in range(len(frames_buffer)):
+            f_logits = logits[b_idx]
+            f_boxes = pred_boxes[b_idx]
+            scores, labels = f_logits.max(dim=-1)
+
+            # Per-class thresholding: Smoke (0) >= conf_smoke, Fire (1) >= conf_fire
+            keep = ((labels == 0) & (scores >= conf_smoke)) | ((labels == 1) & (scores >= conf_fire))
+            k_scores = scores[keep]
+            k_labels = labels[keep]
+            k_boxes = f_boxes[keep]
+
+            detections = []
+            if len(k_scores) > 0:
+                cx, cy, bw, bh = k_boxes[:, 0], k_boxes[:, 1], k_boxes[:, 2], k_boxes[:, 3]
+                x1 = ((cx - bw / 2.0) * width).clamp(0, width)
+                y1 = ((cy - bh / 2.0) * height).clamp(0, height)
+                x2 = ((cx + bw / 2.0) * width).clamp(0, width)
+                y2 = ((cy + bh / 2.0) * height).clamp(0, height)
+                xyxy = torch.stack([x1, y1, x2, y2], dim=-1)
+
+                for c_id in [0, 1]:
+                    c_mask = (k_labels == c_id)
+                    if c_mask.sum() == 0:
+                        continue
+                    c_xyxy = xyxy[c_mask]
+                    c_sc = k_scores[c_mask]
+                    nms_idx = torchvision.ops.nms(c_xyxy, c_sc, iou_threshold=iou_thresh)
+
+                    for idx in nms_idx:
+                        detections.append({
+                            "class_id": c_id,
+                            "score": float(c_sc[idx].item()),
+                            "box": [int(v.item()) for v in c_xyxy[idx]],
+                        })
+            frame_dets_list.append(detections)
+    return frame_dets_list
+
 def process_video_worker(
     job_id: str,
     input_path: str,
@@ -269,7 +360,10 @@ def process_video_worker(
         jobs[job_id]["status"] = "processing"
         jobs[job_id]["message"] = "Initializing model and reading video..."
 
-        if "small" in model_type or "512" in model_type:
+        is_yolo = "yolo" in model_type.lower()
+        if is_yolo:
+            model_label = "YOLOv11 Large"
+        elif "small" in model_type or "512" in model_type:
             model_label = "RF-DETR Small (512x512)"
         elif model_type == "sota_5ep":
             model_label = "5-Epoch SOTA Color"
@@ -312,54 +406,10 @@ def process_video_worker(
             frames_buffer.append(frame)
 
             if len(frames_buffer) == batch_size:
-                pil_images = [
-                    Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frames_buffer
-                ]
-                inputs = processor(images=pil_images, return_tensors="pt")
-                pixel_values = inputs["pixel_values"].to(DEVICE)
-
-                with torch.no_grad():
-                    with torch.amp.autocast(DEVICE, dtype=torch.float16 if DEVICE == "cuda" else torch.bfloat16):
-                        outputs = model(pixel_values=pixel_values)
-
-                logits = outputs.logits.sigmoid()
-                pred_boxes = outputs.pred_boxes
-
-                for b_idx, f_orig in enumerate(frames_buffer):
-                    f_logits = logits[b_idx]
-                    f_boxes = pred_boxes[b_idx]
-                    scores, labels = f_logits.max(dim=-1)
-
-                    # Per-class thresholding: Smoke (0) >= conf_smoke, Fire (1) >= conf_fire
-                    keep = ((labels == 0) & (scores >= conf_smoke)) | ((labels == 1) & (scores >= conf_fire))
-                    k_scores = scores[keep]
-                    k_labels = labels[keep]
-                    k_boxes = f_boxes[keep]
-
-                    detections = []
-                    if len(k_scores) > 0:
-                        cx, cy, bw, bh = k_boxes[:, 0], k_boxes[:, 1], k_boxes[:, 2], k_boxes[:, 3]
-                        x1 = ((cx - bw / 2.0) * width).clamp(0, width)
-                        y1 = ((cy - bh / 2.0) * height).clamp(0, height)
-                        x2 = ((cx + bw / 2.0) * width).clamp(0, width)
-                        y2 = ((cy + bh / 2.0) * height).clamp(0, height)
-                        xyxy = torch.stack([x1, y1, x2, y2], dim=-1)
-
-                        for c_id in [0, 1]:
-                            c_mask = (k_labels == c_id)
-                            if c_mask.sum() == 0:
-                                continue
-                            c_xyxy = xyxy[c_mask]
-                            c_sc = k_scores[c_mask]
-                            nms_idx = torchvision.ops.nms(c_xyxy, c_sc, iou_threshold=iou_thresh)
-
-                            for idx in nms_idx:
-                                detections.append({
-                                    "class_id": c_id,
-                                    "score": float(c_sc[idx].item()),
-                                    "box": [int(v.item()) for v in c_xyxy[idx]],
-                                })
-
+                frame_dets_list = run_inference_on_batch(
+                    frames_buffer, model, processor, is_yolo, conf_smoke, conf_fire, iou_thresh, width, height
+                )
+                for f_orig, detections in zip(frames_buffer, frame_dets_list):
                     detections.sort(key=lambda d: d["score"])
                     num_smoke = sum(1 for d in detections if d["class_id"] == 0)
                     num_fire = sum(1 for d in detections if d["class_id"] == 1)
@@ -384,48 +434,10 @@ def process_video_worker(
 
         # Residual buffer
         if len(frames_buffer) > 0:
-            pil_images = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frames_buffer]
-            inputs = processor(images=pil_images, return_tensors="pt")
-            pixel_values = inputs["pixel_values"].to(DEVICE)
-            with torch.no_grad():
-                with torch.amp.autocast(DEVICE, dtype=torch.float16 if DEVICE == "cuda" else torch.bfloat16):
-                    outputs = model(pixel_values=pixel_values)
-            logits = outputs.logits.sigmoid()
-            pred_boxes = outputs.pred_boxes
-
-            for b_idx, f_orig in enumerate(frames_buffer):
-                f_logits = logits[b_idx]
-                f_boxes = pred_boxes[b_idx]
-                scores, labels = f_logits.max(dim=-1)
-                # Per-class thresholding: Smoke (0) >= conf_smoke, Fire (1) >= conf_fire
-                keep = ((labels == 0) & (scores >= conf_smoke)) | ((labels == 1) & (scores >= conf_fire))
-                k_scores = scores[keep]
-                k_labels = labels[keep]
-                k_boxes = f_boxes[keep]
-
-                detections = []
-                if len(k_scores) > 0:
-                    cx, cy, bw, bh = k_boxes[:, 0], k_boxes[:, 1], k_boxes[:, 2], k_boxes[:, 3]
-                    x1 = ((cx - bw / 2.0) * width).clamp(0, width)
-                    y1 = ((cy - bh / 2.0) * height).clamp(0, height)
-                    x2 = ((cx + bw / 2.0) * width).clamp(0, width)
-                    y2 = ((cy + bh / 2.0) * height).clamp(0, height)
-                    xyxy = torch.stack([x1, y1, x2, y2], dim=-1)
-
-                    for c_id in [0, 1]:
-                        c_mask = (k_labels == c_id)
-                        if c_mask.sum() == 0:
-                            continue
-                        c_xyxy = xyxy[c_mask]
-                        c_sc = k_scores[c_mask]
-                        nms_idx = torchvision.ops.nms(c_xyxy, c_sc, iou_threshold=iou_thresh)
-                        for idx in nms_idx:
-                            detections.append({
-                                "class_id": c_id,
-                                "score": float(c_sc[idx].item()),
-                                "box": [int(v.item()) for v in c_xyxy[idx]],
-                            })
-
+            frame_dets_list = run_inference_on_batch(
+                frames_buffer, model, processor, is_yolo, conf_smoke, conf_fire, iou_thresh, width, height
+            )
+            for f_orig, detections in zip(frames_buffer, frame_dets_list):
                 detections.sort(key=lambda d: d["score"])
                 num_smoke = sum(1 for d in detections if d["class_id"] == 0)
                 num_fire = sum(1 for d in detections if d["class_id"] == 1)
@@ -436,6 +448,7 @@ def process_video_worker(
                 draw_hud(f_orig, processed_count + 1, total_frames, num_smoke, num_fire, conf_smoke, conf_fire, model_label)
                 writer.write(f_orig)
                 processed_count += 1
+            frames_buffer.clear()
 
         cap.release()
         writer.release()
